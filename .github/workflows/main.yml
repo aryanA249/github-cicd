@@ -78,18 +78,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           
           if [ -f bandit-report.json ]; then
-            echo "### Vulnerabilities Found:" >> $GITHUB_STEP_SUMMARY
-            python3 -c "
-            import json
-            with open('bandit-report.json') as f:
-              data = json.load(f)
-              
-            if data['results']:
-              for issue in data['results']:
-                print(f\"- **{issue['test_name']}** ({issue['severity']}) at line {issue['line_number']}\")
-            else:
-              print('✅ No vulnerabilities detected!')
-            " >> $GITHUB_STEP_SUMMARY || echo "Could not parse Bandit results" >> $GITHUB_STEP_SUMMARY
+            python3 summarize_bandit_results.py >> $GITHUB_STEP_SUMMARY || echo "Could not parse Bandit results" >> $GITHUB_STEP_SUMMARY
           fi
 
       # Step 8: Upload Bandit report as artifact
