@@ -1,0 +1,1 @@
+﻿{"results": [{"issue_severity": "HIGH", "test_name": "hardcoded_password_string", "issue_text": "Hardcoded password", "filename": "app.py", "line_number": 18, "issue_confidence": "HIGH"}], "metrics": {"_totals": {"loc": 123}}}
