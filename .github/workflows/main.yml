@@ -1,0 +1,152 @@
+name: Secure CI/CD Pipeline with Security Scanning
+
+# Trigger: Run this workflow on push to main branch
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+
+# Environment-level concurrency: prevents duplicate workflows
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  security-scan:
+    name: Security Vulnerability Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Step 1: Checkout the repository code
+      # This makes the code available to the workflow
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Full history for better analysis
+
+      # Step 2: Setup Python environment
+      # Install Python 3.10 for our application
+      - name: Setup Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'  # Cache pip dependencies for faster builds
+
+      # Step 3: Display Python version
+      # Verification step to confirm correct Python version
+      - name: Display Python version
+        run: |
+          python -c "import sys; print(f'Python version: {sys.version}')"
+
+      # Step 4: Install Bandit (Python SAST Security Tool)
+      # Bandit scans Python code for common security issues
+      - name: Install Bandit Security Scanner
+        run: pip install bandit[toml]
+        
+      # Step 5: Run Bandit with default settings (all severity levels)
+      # This generates a report of all potential security issues
+      - name: Run Bandit Security Scan (Full Report)
+        id: bandit-full
+        run: |
+          echo "=== BANDIT SECURITY SCAN - FULL REPORT ===" >> $GITHUB_STEP_SUMMARY
+          bandit -r . -f json -o bandit-report.json || true
+          bandit -r . -f txt
+          python3 generate_bandit_report.py
+          echo "✓ Full Bandit scan completed" >> $GITHUB_STEP_SUMMARY
+
+      # Step 6: Run Bandit with strict settings (HIGH severity only)
+      # The -ll flag means "Low and above" severity level
+      # This step will fail the build if high/critical issues are found
+      - name: Run Bandit Strict Check (HIGH severity issues will fail)
+        id: bandit-strict
+        continue-on-error: true
+        run: |
+          echo "=== BANDIT STRICT SCAN - HIGH SEVERITY ONLY ===" >> $GITHUB_STEP_SUMMARY
+          bandit -r . -ll -v
+          echo "✓ Strict Bandit scan completed" >> $GITHUB_STEP_SUMMARY
+
+      # Step 7: Parse Bandit results and create detailed report
+      # Generate a human-readable summary of findings
+      - name: Parse Bandit Results
+        if: always()
+        run: |
+          echo "## Security Scan Results 🔐" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f bandit-report.json ]; then
+            echo "### Vulnerabilities Found:" >> $GITHUB_STEP_SUMMARY
+            python3 -c "
+            import json
+            with open('bandit-report.json') as f:
+              data = json.load(f)
+              
+            if data['results']:
+              for issue in data['results']:
+                print(f\"- **{issue['test_name']}** ({issue['severity']}) at line {issue['line_number']}\")
+            else:
+              print('✅ No vulnerabilities detected!')
+            " >> $GITHUB_STEP_SUMMARY || echo "Could not parse Bandit results" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      # Step 8: Upload Bandit report as artifact
+      # Makes the full report available for download from GitHub Actions UI
+      - name: Upload Bandit Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-security-report
+          path: |
+            bandit-report.json
+            bandit-report.html
+          retention-days: 30
+
+      # Step 9: Fail workflow if high-severity issues found
+      # This prevents merging code with critical security vulnerabilities
+      - name: Check for Critical Issues
+        if: steps.bandit-strict.outcome == 'failure'
+        run: |
+          echo "❌ SECURITY ALERT: High-severity vulnerabilities detected!"
+          echo "Please review and fix the issues before deploying."
+          exit 1
+
+      # Step 10: Success message
+      - name: Security Check Passed ✅
+        if: steps.bandit-strict.outcome == 'success'
+        run: echo "✅ All security checks passed! No high-severity issues detected."
+
+  # Optional: Python dependencies check
+  dependencies-check:
+    name: Check Python Dependencies
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      # Optional: Check if requirements.txt exists
+      - name: Verify Dependencies File
+        run: |
+          if [ -f requirements.txt ]; then
+            echo "✓ requirements.txt found"
+            echo "Dependencies:"
+            cat requirements.txt
+          else
+            echo "⚠ Warning: requirements.txt not found"
+          fi
+
+      # Optional: List potential outdated packages
+      - name: Check for Outdated Dependencies
+        continue-on-error: true
+        run: |
+          pip install pip-audit
+          echo "=== Checking for vulnerable dependencies ===" 
+          pip-audit --desc || true
